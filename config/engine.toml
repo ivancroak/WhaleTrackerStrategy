@@ -1,0 +1,55 @@
+# Whale Engine Configuration — v2 Parameters
+#
+# All values here are the strategy v2 defaults from:
+#   WebClaudeOpusAnalysis/whale-copy-trading-optimized.md
+#
+# Wallet credentials (private key, API keys) are loaded from
+# environment variables only — NEVER put secrets in this file.
+
+[risk]
+# Max fraction of portfolio per trade (10%)
+max_position_pct = "0.10"
+# Max concurrent open positions
+max_open_positions = 10
+# Max total exposure as fraction of portfolio (90% — deploy capital aggressively)
+total_exposure_cap = "0.90"
+# Daily loss halt threshold (5% of portfolio)
+daily_loss_stop_pct = "0.05"
+# Drawdown from peak that triggers full shutdown (12%)
+drawdown_breaker_pct = "0.12"
+
+[kelly]
+# Quarter-Kelly for LOW confidence (60-69% consensus)
+low = "0.25"
+# Half-Kelly for MEDIUM confidence (70-79% consensus)
+medium = "0.50"
+# Three-quarter Kelly for HIGH confidence (80%+ consensus)
+high = "0.75"
+
+[execution]
+# Skip trade if price moved more than 3% from whale entry
+max_slippage_from_whale = "0.03"
+# Don't enter if market is within 5 cents of resolution
+min_spread_from_resolution = "0.05"
+
+[connection]
+# Polymarket CLOB REST API
+clob_url = "https://clob.polymarket.com"
+# Polymarket CLOB WebSocket
+ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/"
+# Polygon mainnet chain ID
+chain_id = 137
+
+[scoring]
+# Automatic whale scoring & filtering parameters
+category_focus = "all"
+min_markets_traded = 10
+min_total_pnl = "10000"
+min_avg_pct_return = "8"
+# max_avg_daily_transactions_7d = 100  # bot filter removed — bots add signal to consensus
+scoring_lookback_months = 6
+activity_recency_days = 4
+max_tracked_wallets = 25
+rescan_interval_hours = 24
+removal_threshold_days = 7
+leaderboard_scan_size = 100

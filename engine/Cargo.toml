@@ -1,0 +1,75 @@
+[package]
+name = "whale-engine"
+version = "0.1.0"
+edition = "2024"
+description = "Polymarket whale copy trading execution engine"
+license = "MIT"
+
+[[bin]]
+name = "whale-engine"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.49", features = ["full"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+
+# Serialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+simd-json = "0.17"
+
+# Precise arithmetic (NEVER f64 for money)
+rust_decimal = { version = "1.40", features = ["serde-with-str"] }
+rust_decimal_macros = "1.40"
+
+# Ethereum / EIP-712 signing (alloy replaces deprecated ethers-rs)
+alloy = { version = "1.7", features = ["signer-local", "provider-http", "network", "sol-types"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Config
+dotenvy = "0.15"
+toml = "0.8"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Time and IDs
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.21", features = ["v4", "serde"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# WebSocket stream utilities
+futures-util = "0.3"
+
+# HMAC authentication for CLOB API
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+# Random (for order salt generation)
+rand = "0.8"
+
+# Telegram bot (optional, feature-gated)
+teloxide = { version = "0.13", features = ["macros"], optional = true }
+
+[features]
+default = []
+telegram = ["dep:teloxide"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

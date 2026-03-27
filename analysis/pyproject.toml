@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "whale-tracker"
+version = "0.1.0"
+description = "Polymarket whale copy trading analysis layer"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.10.6,<3",
+    "pandas>=2.2.3,<3",
+    "numpy>=2.2.3,<3",
+    "httpx>=0.28.1,<1",
+    "python-dotenv>=1.0.1,<2",
+    "tenacity>=9.0.0,<10",
+    "py-clob-client>=0.18.0,<1",
+    "tomli>=2.0.0,<3; python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5,<9",
+    "pytest-asyncio>=0.25.3,<1",
+    "ruff>=0.9.10,<1",
+    "mypy>=1.15.0,<2",
+    "pandas-stubs>=2.2.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whale_tracker"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["UP036"]  # Allow sys.version_info blocks for tomllib fallback
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

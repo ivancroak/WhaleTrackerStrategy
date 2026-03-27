@@ -1,0 +1,51 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Rust
+engine/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Data (keep dir, ignore contents)
+data/*
+!data/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# AI tool configs (local development tooling)
+.claude/
+.agents/
+.gemini/
+.codex/
+.mcp.json
+GEMINI.md
+context.md
+docs/ai/
+
+# Separate projects
+PM strategies/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+*.jsonl
