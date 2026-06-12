@@ -248,3 +248,9 @@ MIT
 ## Disclaimer
 
 This software is provided for educational and research purposes. Trading on prediction markets carries significant financial risk. This bot executes real trades with real money on Polymarket. Use at your own risk. The authors are not responsible for any financial losses incurred through the use of this software. Always review and understand the code before deploying with real funds.
+
+## Author
+
+**Ivan Rykovski** — [GitHub](https://github.com/ivancroak) · [LinkedIn](https://www.linkedin.com/in/ivan-rykovski)
+
+Developed privately during 2025–2026; published as a snapshot release in March 2026.
