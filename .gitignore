@@ -32,10 +32,18 @@ data/*
 # AI tool configs (local development tooling)
 .claude/
 .agents/
+_agents/
+.factory/
 .gemini/
 .codex/
 .mcp.json
+CLAUDE.md
+AGENTS.md
 GEMINI.md
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+skills-lock.json
 context.md
 docs/ai/
 
