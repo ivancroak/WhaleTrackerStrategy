@@ -1,5 +1,7 @@
 # Whale Tracker Strategy
 
+[![CI](https://github.com/ivancroak/WhaleTrackerStrategy/actions/workflows/ci.yml/badge.svg)](https://github.com/ivancroak/WhaleTrackerStrategy/actions/workflows/ci.yml)
+
 A high-performance Polymarket whale copy trading bot using a **Rust + Python hybrid architecture**. The Rust engine handles latency-critical execution (WebSocket listening, EIP-712 order signing, risk management), while the Python layer handles analysis (whale discovery, scoring, signal detection, position sizing) — including a **pandas/NumPy feature-engineering pipeline and an optional scikit-learn wallet-ranking model**.
 
 ## Architecture

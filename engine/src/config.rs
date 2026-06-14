@@ -212,7 +212,9 @@ chain_id = 80001
 
         if config_path.exists() {
             let config = load_engine_config(&config_path).unwrap();
-            assert_eq!(config.risk.max_position_pct, dec!(0.03));
+            // The shipped config overrides the 0.03 struct default with the
+            // deliberate aggressive-v2 value (0.10); assert the real file value.
+            assert_eq!(config.risk.max_position_pct, dec!(0.10));
         }
     }
 }
