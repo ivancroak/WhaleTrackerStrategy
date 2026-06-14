@@ -76,6 +76,14 @@ Beyond the rule-based scorer, the Python layer includes a quantitative feature-e
 
 **Wallet-ranking model — [`model.py`](analysis/src/whale_tracker/model.py).** `WhalePerformanceModel` wraps a scikit-learn `StandardScaler → GradientBoostingRegressor` pipeline that learns to predict a wallet's realized PnL from those features and ranks candidates accordingly. It is honest by design: a *runtime-trained* estimator (not a pre-trained black box, and it publishes no accuracy claims), with a deterministic z-scored heuristic fallback whenever there is too little labelled data to train responsibly. Enable it via `rank_candidates(..., use_model=True, model=...)`; the default ranking path is unchanged and model-free.
 
+**Out-of-sample evaluation — [`evaluation.py`](analysis/src/whale_tracker/evaluation.py), [`metrics.md`](analysis/metrics.md).** The model is evaluated the way a ranking signal should be: a disjoint **train/test split** and a **Spearman rank-IC** (does it order held-out wallets correctly?), reported against the heuristic baseline, plus out-of-sample R² and a top-vs-bottom quintile lift. On a seeded synthetic corpus the trained model reaches a held-out **rank-IC ≈ 0.54**, edging the baseline. Reproduce it in one command:
+
+```bash
+cd analysis && uv run --extra dev python examples/evaluate_ranker.py
+```
+
+The corpus is synthetic and fully seeded (no live track record is implied); see [`metrics.md`](analysis/metrics.md) for the methodology and full results.
+
 ## Prerequisites
 
 - **Rust** 2024 edition (1.85+)
