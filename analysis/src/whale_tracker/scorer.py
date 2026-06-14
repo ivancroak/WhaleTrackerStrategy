@@ -21,6 +21,7 @@ from dataclasses import field as dataclass_field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,24 @@ from whale_tracker.data_api import (
     PolymarketDataClient,
 )
 from whale_tracker.monitor import WatchedWallet
+
+# Optional analytics/ML stack. pandas/numpy/scikit-learn are declared
+# dependencies, but we guard the import so the core scoring pipeline (and its
+# tests) keep importing even if the data-science extras are absent in some
+# minimal environment. ``_ANALYTICS_AVAILABLE`` gates the feature-frame and
+# model-reranking helpers below.
+try:
+    from whale_tracker import analytics as _analytics
+
+    _ANALYTICS_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only without pandas/numpy
+    _analytics = None  # type: ignore[assignment]
+    _ANALYTICS_AVAILABLE = False
+
+if TYPE_CHECKING:  # pragma: no cover - type-only imports
+    import pandas as pd
+
+    from whale_tracker.model import WhalePerformanceModel
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -87,9 +106,7 @@ class ScoringConfig:
             min_markets_traded=int(scoring.get("min_markets_traded", 20)),
             min_total_pnl=Decimal(str(scoring.get("min_total_pnl", "10000"))),
             min_avg_pct_return=Decimal(str(scoring.get("min_avg_pct_return", "8"))),
-            max_avg_daily_transactions_7d=int(
-                scoring.get("max_avg_daily_transactions_7d", 100)
-            ),
+            max_avg_daily_transactions_7d=int(scoring.get("max_avg_daily_transactions_7d", 100)),
             scoring_lookback_months=int(scoring.get("scoring_lookback_months", 6)),
             activity_recency_days=int(scoring.get("activity_recency_days", 4)),
             max_tracked_wallets=int(scoring.get("max_tracked_wallets", 25)),
@@ -315,9 +332,7 @@ async def score_wallet(
 
     # Filter activities to the scoring lookback window
     lookback_cutoff = now - timedelta(days=config.scoring_lookback_months * 30)
-    activities = [
-        a for a in all_activities if _ensure_utc(a.timestamp) >= lookback_cutoff
-    ]
+    activities = [a for a in all_activities if _ensure_utc(a.timestamp) >= lookback_cutoff]
     avg_daily_txns = ZERO
     last_trade_at: datetime | None = None
 
@@ -347,7 +362,8 @@ async def score_wallet(
         # Category-specific — detect categories from local data
         market_categories = _build_categories_from_local_data(activities, closed_positions)
         filtered_closed = [
-            pos for pos in closed_positions
+            pos
+            for pos in closed_positions
             if market_categories.get(pos.condition_id, "").lower() == focus
         ]
 
@@ -356,9 +372,7 @@ async def score_wallet(
     # FIFO adds BUY→SELL matched pairs from activity (no resolution needed)
     fifo_rts: list[RoundTripTrade] = []
     if activities:
-        fifo_rts = match_round_trips(
-            activities, market_categories, {}, config.category_focus
-        )
+        fifo_rts = match_round_trips(activities, market_categories, {}, config.category_focus)
 
     # Merge: closed positions are authoritative, FIFO adds new markets only
     closed_cids = {rt.condition_id for rt in closed_rts}
@@ -505,8 +519,7 @@ async def discover_whales(
         name = candidate.display_name or candidate.address[:12]
         source_text = ",".join(candidate.discovery_sources)
         print(
-            f"[scorer] Scoring {index}/{len(candidates)}: {name} "
-            f"(sources={source_text})...",
+            f"[scorer] Scoring {index}/{len(candidates)}: {name} (sources={source_text})...",
             end=" ",
         )
 
@@ -537,9 +550,7 @@ async def discover_whales(
     passing.sort(key=_wallet_rank_key, reverse=True)
     top = passing[: config.max_tracked_wallets]
 
-    print(
-        f"\n[scorer] {len(passing)} wallets passed all filters, keeping top {len(top)}"
-    )
+    print(f"\n[scorer] {len(passing)} wallets passed all filters, keeping top {len(top)}")
 
     wallets: list[WatchedWallet] = []
     for score in top:
@@ -623,6 +634,119 @@ def apply_auto_removal(
             kept.append(wallet)
 
     return kept, removed
+
+
+# ---------------------------------------------------------------------------
+# Feature engineering + optional model reranking (pandas/NumPy/scikit-learn)
+# ---------------------------------------------------------------------------
+
+
+def build_feature_frame(
+    scored_wallets: list[WalletScore],
+    *,
+    round_trips_by_address: dict[str, list[RoundTripTrade]] | None = None,
+    activities_by_address: dict[str, list[ActivityEntry]] | None = None,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """Build a pandas feature matrix (one row per wallet) from scored wallets.
+
+    This is the genuine entry point through which the scoring layer invokes
+    pandas/NumPy: it delegates to :func:`whale_tracker.analytics.build_feature_frame`,
+    which engineers ROI, realized-PnL, win-rate, volatility, a Sharpe-like
+    ratio, an exponential recency weight, and a composite score.
+
+    Args:
+        scored_wallets: Wallets already scored by :func:`score_wallet`.
+        round_trips_by_address: Optional per-wallet matched round-trips, used to
+            compute the distribution-based columns (win rate, volatility,
+            Sharpe-like) from real per-trade returns.
+        activities_by_address: Optional per-wallet raw activity, used to derive
+            ``avg_hold_hours``.
+        now: Reference time for the recency decay (defaults to now, UTC).
+
+    Returns:
+        A :class:`pandas.DataFrame` indexed by wallet address.
+
+    Raises:
+        RuntimeError: If the analytics extras (pandas/NumPy) are unavailable.
+    """
+    if not _ANALYTICS_AVAILABLE or _analytics is None:
+        raise RuntimeError(
+            "build_feature_frame requires the analytics extras (pandas/numpy); "
+            "install them via `pip install -e '.[dev]'`."
+        )
+    return _analytics.build_feature_frame(
+        scored_wallets,
+        round_trips_by_address=round_trips_by_address,
+        activities_by_address=activities_by_address,
+        now=now,
+    )
+
+
+def rank_candidates(
+    scored_wallets: list[WalletScore],
+    *,
+    use_model: bool = False,
+    model: WhalePerformanceModel | None = None,
+    round_trips_by_address: dict[str, list[RoundTripTrade]] | None = None,
+    activities_by_address: dict[str, list[ActivityEntry]] | None = None,
+    now: datetime | None = None,
+) -> list[WalletScore]:
+    """Rank scored wallets, optionally reranking with a scikit-learn model.
+
+    Default behaviour (``use_model=False``) is intentionally identical to the
+    rest of the pipeline: wallets are sorted by :func:`_wallet_rank_key`
+    (weighted ROI, then realized PnL, depth, seed PnL), best first. This path
+    touches neither pandas nor the model, so existing behaviour is unchanged.
+
+    When ``use_model=True`` a :class:`whale_tracker.model.WhalePerformanceModel`
+    drives the order instead. A feature frame is built via
+    :func:`build_feature_frame` and the model's predicted score per wallet
+    determines the ranking. The model itself degrades gracefully to a
+    deterministic heuristic when it has not been trained, so this never throws
+    on an unfit model.
+
+    Args:
+        scored_wallets: Wallets to rank.
+        use_model: Opt in to model-based reranking. ``False`` by default.
+        model: A (typically pre-fitted) model. Required when ``use_model`` is
+            ``True``.
+        round_trips_by_address: Optional per-wallet round-trips for richer
+            features (only used when ``use_model`` is ``True``).
+        activities_by_address: Optional per-wallet activity for ``avg_hold_hours``.
+        now: Reference time for the recency decay.
+
+    Returns:
+        A new list of the same ``WalletScore`` objects, ordered best-first.
+
+    Raises:
+        ValueError: If ``use_model`` is ``True`` but no ``model`` is supplied.
+        RuntimeError: If ``use_model`` is ``True`` but the analytics extras are
+            unavailable.
+    """
+    if not use_model:
+        return sorted(scored_wallets, key=_wallet_rank_key, reverse=True)
+
+    if model is None:
+        raise ValueError("use_model=True requires a WhalePerformanceModel instance")
+    if not _ANALYTICS_AVAILABLE:
+        raise RuntimeError(
+            "model reranking requires the analytics extras (pandas/numpy/scikit-learn)."
+        )
+
+    frame = build_feature_frame(
+        scored_wallets,
+        round_trips_by_address=round_trips_by_address,
+        activities_by_address=activities_by_address,
+        now=now,
+    )
+    ranked = model.rank(frame)
+    order = {entry.address: position for position, entry in enumerate(ranked)}
+    # Stable: wallets the model never saw (shouldn't happen) fall to the end.
+    return sorted(
+        scored_wallets,
+        key=lambda score: order.get(score.address, len(order)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -851,24 +975,80 @@ _SPORTS_PREFIXES = (
 
 _SPORTS_TITLE_KEYWORDS = (
     # Leagues
-    "nhl", "nba", "nfl", "mlb", "mls", "ufc", "epl",
-    "premier league", "la liga", "serie a", "bundesliga",
-    "ligue 1", "champions league", "europa league",
-    "ncaa", "wnba", "pga", "atp", "wta", "ipl", "nrl", "afl",
+    "nhl",
+    "nba",
+    "nfl",
+    "mlb",
+    "mls",
+    "ufc",
+    "epl",
+    "premier league",
+    "la liga",
+    "serie a",
+    "bundesliga",
+    "ligue 1",
+    "champions league",
+    "europa league",
+    "ncaa",
+    "wnba",
+    "pga",
+    "atp",
+    "wta",
+    "ipl",
+    "nrl",
+    "afl",
     # Sports
-    "football", "basketball", "baseball", "hockey", "soccer",
-    "tennis", "cricket", "boxing", "mma", "golf", "f1",
-    "grand prix", "formula", "racing",
+    "football",
+    "basketball",
+    "baseball",
+    "hockey",
+    "soccer",
+    "tennis",
+    "cricket",
+    "boxing",
+    "mma",
+    "golf",
+    "f1",
+    "grand prix",
+    "formula",
+    "racing",
     # Betting terms in titles
-    "win on 20", "will win", "to win",
+    "win on 20",
+    "will win",
+    "to win",
     # Team patterns (common in Polymarket titles)
-    "fc ", " fc", "united", "city ", "rovers",
-    "chiefs", "eagles", "cowboys", "packers", "ravens",
-    "lakers", "celtics", "warriors", "nets", "knicks",
-    "yankees", "dodgers", "red sox", "cubs", "mets",
-    "oilers", "bruins", "rangers", "penguins", "maple leafs",
-    "open men", "open women", "grand slam",
-    "australian open", "french open", "wimbledon", "us open",
+    "fc ",
+    " fc",
+    "united",
+    "city ",
+    "rovers",
+    "chiefs",
+    "eagles",
+    "cowboys",
+    "packers",
+    "ravens",
+    "lakers",
+    "celtics",
+    "warriors",
+    "nets",
+    "knicks",
+    "yankees",
+    "dodgers",
+    "red sox",
+    "cubs",
+    "mets",
+    "oilers",
+    "bruins",
+    "rangers",
+    "penguins",
+    "maple leafs",
+    "open men",
+    "open women",
+    "grand slam",
+    "australian open",
+    "french open",
+    "wimbledon",
+    "us open",
 )
 
 

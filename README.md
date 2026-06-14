@@ -1,6 +1,6 @@
 # Whale Tracker Strategy
 
-A high-performance Polymarket whale copy trading bot using a **Rust + Python hybrid architecture**. The Rust engine handles latency-critical execution (WebSocket listening, EIP-712 order signing, risk management), while the Python layer handles analysis (whale discovery, scoring, signal detection, position sizing).
+A high-performance Polymarket whale copy trading bot using a **Rust + Python hybrid architecture**. The Rust engine handles latency-critical execution (WebSocket listening, EIP-712 order signing, risk management), while the Python layer handles analysis (whale discovery, scoring, signal detection, position sizing) — including a **pandas/NumPy feature-engineering pipeline and an optional scikit-learn wallet-ranking model**.
 
 ## Architecture
 
@@ -29,6 +29,7 @@ A high-performance Polymarket whale copy trading bot using a **Rust + Python hyb
 │                                                             │
 │  Leaderboard Scanner ──► Wallet Scorer (Sharpe, Kelly, WR)  │
 │  FIFO Trade Matching ──► Auto-Removal (soft/hard failures)  │
+│  Feature Engineering ──► ML Ranker (scikit-learn) ──► Rank  │
 │  Consensus Detection ──► Position Sizing (Kelly Criterion)  │
 │  Backtesting ──► Reporting ──► Telegram Alerts              │
 └─────────────────────────────────────────────────────────────┘
@@ -39,6 +40,8 @@ A high-performance Polymarket whale copy trading bot using a **Rust + Python hyb
 - **Real-time whale detection** via Polymarket CLOB WebSocket feed
 - **Automatic wallet discovery** from Polymarket leaderboard (no Arkham needed)
 - **Multi-metric scoring**: Sharpe ratio, Kelly Criterion, rolling win rate, expected value
+- **Feature engineering** (pandas / NumPy): per-wallet ROI, realized-PnL volatility, Sharpe-like ratio, win rate, and exponential recency weighting
+- **ML wallet ranking** via a scikit-learn `GradientBoostingRegressor` pipeline, with a deterministic heuristic fallback
 - **5-layer risk gate**: position size, open count, category limits, exposure cap, drawdown breaker
 - **EIP-712 order signing** with alloy (successor to deprecated ethers-rs)
 - **Strategy-agnostic design** via `SignalSource` trait (Rust) / ABC (Python)
@@ -62,6 +65,14 @@ Kelly Criterion position sizing with configurable confidence tiers:
 - **LOW** (60-69% consensus): Quarter-Kelly (0.25)
 - **MEDIUM** (70-79%): Half-Kelly (0.50)
 - **HIGH** (80%+): Three-quarter Kelly (0.75)
+
+## Quantitative & Machine-Learning Layer
+
+Beyond the rule-based scorer, the Python layer includes a quantitative feature-engineering pipeline and an optional learned ranking model.
+
+**Feature engineering — [`analytics.py`](analysis/src/whale_tracker/analytics.py).** Turns scored wallets (and their matched round-trips / raw activity) into a one-row-per-wallet `pandas` feature matrix. NumPy computes the statistics genuinely: win rate (`mean(returns > 0)`), PnL volatility (`std`), a Sharpe-like reward-to-variability ratio (`mean / std`), and an exponential half-life recency weight (`exp(-ln2 · days / half_life)`). Missing round-trip detail is preserved as `NaN`, so "unknown" is never silently confused with a real zero.
+
+**Wallet-ranking model — [`model.py`](analysis/src/whale_tracker/model.py).** `WhalePerformanceModel` wraps a scikit-learn `StandardScaler → GradientBoostingRegressor` pipeline that learns to predict a wallet's realized PnL from those features and ranks candidates accordingly. It is honest by design: a *runtime-trained* estimator (not a pre-trained black box, and it publishes no accuracy claims), with a deterministic z-scored heuristic fallback whenever there is too little labelled data to train responsibly. Enable it via `rank_candidates(..., use_model=True, model=...)`; the default ranking path is unchanged and model-free.
 
 ## Prerequisites
 
@@ -157,12 +168,12 @@ All whale tracking uses **free Polymarket APIs** (no Arkham or paid services req
 # Rust — 33 tests (unit + integration)
 cd engine && cargo test
 
-# Python — 45 tests (scoring + risk gate)
+# Python — 71 tests (scoring, risk gate, analytics, ML model)
 cd analysis && python -m pytest tests/ -v
 
 # Linting
 cd engine && cargo clippy -- -D warnings
-cd analysis && ruff check src/
+cd analysis && ruff check src/ && mypy --strict src/
 ```
 
 ## Project Structure
@@ -188,6 +199,8 @@ WhaleTrackerStrategy/
 ├── analysis/                        # Python analysis layer
 │   ├── src/whale_tracker/
 │   │   ├── scorer.py                # Wallet discovery & scoring pipeline
+│   │   ├── analytics.py             # pandas/NumPy feature engineering
+│   │   ├── model.py                 # scikit-learn wallet-ranking model
 │   │   ├── bot.py                   # Orchestrator loop
 │   │   ├── data_api.py              # Polymarket API client
 │   │   ├── risk_gate.py             # Risk validation (mirrors Rust)
@@ -198,10 +211,12 @@ WhaleTrackerStrategy/
 │   │   └── signal_source.py         # SignalSource ABC
 │   └── tests/
 │       ├── test_scorer.py           # 29 scoring tests
-│       └── test_risk_gate.py        # 16 risk gate tests
+│       ├── test_risk_gate.py        # 16 risk gate tests
+│       ├── test_analytics.py        # 16 feature-engineering tests
+│       └── test_model.py            # 10 ML model tests
 ├── config/
 │   └── engine.toml                  # Strategy parameters (source of truth)
-├── WebClaudeOpusAnalysis/           # Strategy reference docs
+├── docs/strategy-notes/             # Strategy reference docs
 ├── scripts/                         # Utility scripts
 ├── data/                            # Trade logs (gitignored)
 ├── .env.example                     # Credential template
@@ -226,20 +241,21 @@ WhaleTrackerStrategy/
 | Package | Purpose |
 |---------|---------|
 | pydantic v2 | Type-safe data models |
-| pandas + numpy | Scoring calculations |
+| pandas + numpy | Feature engineering & analytics |
+| scikit-learn + joblib | Wallet-performance ranking model |
 | httpx | Async HTTP client |
 | py-clob-client | Polymarket order API |
 | pytest + ruff + mypy | Testing & quality |
 
 ## Strategy Reference
 
-Detailed strategy documentation lives in [`WebClaudeOpusAnalysis/`](WebClaudeOpusAnalysis/):
+Detailed strategy documentation lives in [`docs/strategy-notes/`](docs/strategy-notes/):
 
-- [v2 Strategy (current)](WebClaudeOpusAnalysis/whale-copy-trading-optimized.md)
-- [v1 to v2 Optimization Analysis](WebClaudeOpusAnalysis/strategy-optimization-analysis.md)
-- [Original v1 Strategy](WebClaudeOpusAnalysis/v1%20Whale%20Copy%20Trading%20Strategy%20Summary.md)
-- [Build Plan](WebClaudeOpusAnalysis/INITIAL_PROMPT.md)
-- [External Sources](WebClaudeOpusAnalysis/SOURCES.md)
+- [v2 Strategy (current)](docs/strategy-notes/whale-copy-trading-optimized.md)
+- [v1 to v2 Optimization Analysis](docs/strategy-notes/strategy-optimization-analysis.md)
+- [Original v1 Strategy](docs/strategy-notes/v1%20Whale%20Copy%20Trading%20Strategy%20Summary.md)
+- [Build Plan](docs/strategy-notes/INITIAL_PROMPT.md)
+- [External Sources](docs/strategy-notes/SOURCES.md)
 
 ## License
 
